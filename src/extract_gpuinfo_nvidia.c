@@ -299,8 +299,6 @@ static bool gpuinfo_nvidia_init(void) {
     goto init_error_clean_exit;
 
   nvmlDeviceGetPcieThroughput = dlsym(libnvidia_ml_handle, "nvmlDeviceGetPcieThroughput");
-  if (!nvmlDeviceGetPcieThroughput)
-    goto init_error_clean_exit;
 
   nvmlDeviceGetFanSpeed = dlsym(libnvidia_ml_handle, "nvmlDeviceGetFanSpeed");
   if (!nvmlDeviceGetFanSpeed)
@@ -327,8 +325,6 @@ static bool gpuinfo_nvidia_init(void) {
     goto init_error_clean_exit;
 
   nvmlDeviceGetGraphicsRunningProcesses = dlsym(libnvidia_ml_handle, "nvmlDeviceGetGraphicsRunningProcesses");
-  if (!nvmlDeviceGetGraphicsRunningProcesses)
-    goto init_error_clean_exit;
 
   nvmlDeviceGetComputeRunningProcesses = dlsym(libnvidia_ml_handle, "nvmlDeviceGetComputeRunningProcesses");
   if (!nvmlDeviceGetComputeRunningProcesses)
@@ -533,15 +529,17 @@ static void gpuinfo_nvidia_refresh_dynamic_info(struct gpu_info *_gpu_info) {
   if (last_nvml_return_status == NVML_SUCCESS)
     SET_VALID(gpuinfo_pcie_link_width_valid, dynamic_info->valid);
 
-  // Pcie reception throughput
-  last_nvml_return_status = nvmlDeviceGetPcieThroughput(device, NVML_PCIE_UTIL_RX_BYTES, &dynamic_info->pcie_rx);
-  if (last_nvml_return_status == NVML_SUCCESS)
-    SET_VALID(gpuinfo_pcie_rx_valid, dynamic_info->valid);
+  if (nvmlDeviceGetPcieThroughput) {
+    // Pcie reception throughput
+    last_nvml_return_status = nvmlDeviceGetPcieThroughput(device, NVML_PCIE_UTIL_RX_BYTES, &dynamic_info->pcie_rx);
+    if (last_nvml_return_status == NVML_SUCCESS)
+      SET_VALID(gpuinfo_pcie_rx_valid, dynamic_info->valid);
 
-  // Pcie transmission throughput
-  last_nvml_return_status = nvmlDeviceGetPcieThroughput(device, NVML_PCIE_UTIL_TX_BYTES, &dynamic_info->pcie_tx);
-  if (last_nvml_return_status == NVML_SUCCESS)
-    SET_VALID(gpuinfo_pcie_tx_valid, dynamic_info->valid);
+    // Pcie transmission throughput
+    last_nvml_return_status = nvmlDeviceGetPcieThroughput(device, NVML_PCIE_UTIL_TX_BYTES, &dynamic_info->pcie_tx);
+    if (last_nvml_return_status == NVML_SUCCESS)
+      SET_VALID(gpuinfo_pcie_tx_valid, dynamic_info->valid);
+  }
 
   // Fan speed
   last_nvml_return_status = nvmlDeviceGetFanSpeed(device, &dynamic_info->fan_speed);
@@ -620,19 +618,21 @@ static void gpuinfo_nvidia_get_running_processes(struct gpu_info *_gpu_info) {
   static nvmlProcessInfo_t *retrieved_infos = NULL;
   unsigned graphical_count = 0, compute_count = 0, recovered_count;
 retry_query_graphical:
-  recovered_count = array_size;
-  last_nvml_return_status = nvmlDeviceGetGraphicsRunningProcesses(device, &recovered_count, retrieved_infos);
-  if (last_nvml_return_status == NVML_ERROR_INSUFFICIENT_SIZE) {
-    array_size += COMMON_PROCESS_LINEAR_REALLOC_INC;
-    retrieved_infos = reallocarray(retrieved_infos, array_size, sizeof(*retrieved_infos));
-    if (!retrieved_infos) {
-      perror("Could not re-allocate memory: ");
-      exit(EXIT_FAILURE);
+  if (nvmlDeviceGetGraphicsRunningProcesses) {
+    recovered_count = array_size;
+    last_nvml_return_status = nvmlDeviceGetGraphicsRunningProcesses(device, &recovered_count, retrieved_infos);
+    if (last_nvml_return_status == NVML_ERROR_INSUFFICIENT_SIZE) {
+      array_size += COMMON_PROCESS_LINEAR_REALLOC_INC;
+      retrieved_infos = reallocarray(retrieved_infos, array_size, sizeof(*retrieved_infos));
+      if (!retrieved_infos) {
+        perror("Could not re-allocate memory: ");
+        exit(EXIT_FAILURE);
+      }
+      goto retry_query_graphical;
     }
-    goto retry_query_graphical;
-  }
-  if (last_nvml_return_status == NVML_SUCCESS) {
-    graphical_count = recovered_count;
+    if (last_nvml_return_status == NVML_SUCCESS) {
+      graphical_count = recovered_count;
+    }
   }
 retry_query_compute:
   recovered_count = array_size - graphical_count;
